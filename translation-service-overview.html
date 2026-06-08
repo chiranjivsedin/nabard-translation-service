@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NABARD Translation Service — Overview</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #f4f6fb;
+      color: #1a2340;
+      line-height: 1.6;
+    }
+
+    header {
+      background: linear-gradient(135deg, #1a3a6b 0%, #0d5c8e 100%);
+      color: white;
+      padding: 36px 48px;
+    }
+
+    header h1 { font-size: 1.9rem; font-weight: 700; }
+    header p  { margin-top: 6px; opacity: 0.85; font-size: 1rem; }
+
+    .badge {
+      display: inline-block;
+      background: rgba(255,255,255,0.18);
+      border: 1px solid rgba(255,255,255,0.35);
+      border-radius: 20px;
+      padding: 3px 12px;
+      font-size: 0.78rem;
+      margin-top: 12px;
+      margin-right: 6px;
+    }
+
+    main { max-width: 1100px; margin: 0 auto; padding: 40px 32px; }
+
+    h2 {
+      font-size: 1.2rem;
+      color: #1a3a6b;
+      border-left: 4px solid #1a3a6b;
+      padding-left: 12px;
+      margin: 40px 0 16px;
+    }
+
+    h3 { font-size: 1rem; color: #0d5c8e; margin: 20px 0 8px; }
+
+    p { margin-bottom: 10px; color: #333; }
+
+    /* Cards */
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin: 16px 0;
+    }
+
+    .card {
+      background: white;
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+      border-top: 3px solid #1a3a6b;
+    }
+
+    .card .icon { font-size: 1.6rem; margin-bottom: 8px; }
+    .card h4 { font-size: 0.95rem; color: #1a3a6b; margin-bottom: 6px; }
+    .card p  { font-size: 0.85rem; color: #555; margin: 0; }
+
+    /* Architecture flow */
+    .flow {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0;
+      margin: 20px 0;
+    }
+
+    .flow-box {
+      background: white;
+      border: 2px solid #1a3a6b;
+      border-radius: 10px;
+      padding: 14px 20px;
+      text-align: center;
+      min-width: 160px;
+    }
+
+    .flow-box .title { font-weight: 700; font-size: 0.9rem; color: #1a3a6b; }
+    .flow-box .sub   { font-size: 0.78rem; color: #666; margin-top: 4px; }
+
+    .flow-box.highlight { background: #e8f0fb; border-color: #0d5c8e; }
+
+    .arrow {
+      font-size: 1.4rem;
+      color: #1a3a6b;
+      padding: 0 10px;
+      font-weight: bold;
+    }
+
+    /* Table */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+      margin: 16px 0;
+      font-size: 0.9rem;
+    }
+
+    th {
+      background: #1a3a6b;
+      color: white;
+      padding: 12px 16px;
+      text-align: left;
+      font-weight: 600;
+    }
+
+    td { padding: 11px 16px; border-bottom: 1px solid #eef0f5; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #f8f9ff; }
+
+    /* Code blocks */
+    code {
+      background: #f0f4fa;
+      border: 1px solid #d0d9ee;
+      border-radius: 5px;
+      padding: 2px 7px;
+      font-family: 'Consolas', monospace;
+      font-size: 0.85rem;
+      color: #1a3a6b;
+    }
+
+    pre {
+      background: #1a2340;
+      color: #e0e8ff;
+      border-radius: 10px;
+      padding: 20px 24px;
+      font-family: 'Consolas', monospace;
+      font-size: 0.85rem;
+      overflow-x: auto;
+      margin: 12px 0;
+      line-height: 1.7;
+    }
+
+    pre .comment { color: #7a9cc8; }
+    pre .string  { color: #a8d8a8; }
+    pre .keyword { color: #f0c080; }
+
+    /* Status badges */
+    .status {
+      display: inline-block;
+      border-radius: 12px;
+      padding: 3px 10px;
+      font-size: 0.78rem;
+      font-weight: 600;
+    }
+    .status.done    { background: #d4edda; color: #155724; }
+    .status.pending { background: #fff3cd; color: #856404; }
+    .status.future  { background: #d1ecf1; color: #0c5460; }
+
+    /* Error table colours */
+    .err-422 { color: #856404; font-weight: 600; }
+    .err-503 { color: #721c24; font-weight: 600; }
+    .err-504 { color: #721c24; font-weight: 600; }
+    .err-502 { color: #721c24; font-weight: 600; }
+
+    footer {
+      text-align: center;
+      padding: 32px;
+      color: #888;
+      font-size: 0.82rem;
+      border-top: 1px solid #dde2ef;
+      margin-top: 48px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>NABARD Translation Service</h1>
+  <p>FastAPI backend for English → Hindi notesheet translation via local Ollama model</p>
+  <span class="badge">Python 3.10+</span>
+  <span class="badge">FastAPI</span>
+  <span class="badge">Ollama</span>
+  <span class="badge">nabard-translator</span>
+  <span class="badge">Port 8000</span>
+</header>
+
+<main>
+
+  <!-- Overview cards -->
+  <h2>Overview</h2>
+  <div class="cards">
+    <div class="card">
+      <div class="icon">🔄</div>
+      <h4>Translation Endpoint</h4>
+      <p>POST /translate — accepts English text, returns formal Hindi (Devanagari)</p>
+    </div>
+    <div class="card">
+      <div class="icon">❤️</div>
+      <h4>Health Check</h4>
+      <p>GET /health — reports Ollama reachability and model availability</p>
+    </div>
+    <div class="card">
+      <div class="icon">🔒</div>
+      <h4>CORS Configured</h4>
+      <p>Accepts requests from frontend (localhost:3000). Configurable via .env</p>
+    </div>
+    <div class="card">
+      <div class="icon">📖</div>
+      <h4>Auto Swagger UI</h4>
+      <p>Interactive API docs at /docs — no manual documentation needed</p>
+    </div>
+  </div>
+
+  <!-- Architecture -->
+  <h2>Architecture</h2>
+  <div class="flow">
+    <div class="flow-box">
+      <div class="title">React Frontend</div>
+      <div class="sub">nabard-modern-ui<br/>localhost:3000</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="flow-box highlight">
+      <div class="title">FastAPI Backend</div>
+      <div class="sub">nabard-translation-service<br/>localhost:8000</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="flow-box">
+      <div class="title">Ollama</div>
+      <div class="sub">Local LLM runtime<br/>localhost:11434</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="flow-box">
+      <div class="title">nabard-translator</div>
+      <div class="sub">translategemma +<br/>NABARD system prompt</div>
+    </div>
+  </div>
+
+  <p>
+    The frontend sends plain English text to <code>POST /translate</code>. The backend forwards it to Ollama and streams
+    back the Hindi response. Glossary pre-processing (known term replacement) and artifact stripping ("Translation:" prefix removal)
+    are applied in the frontend hook <code>useNotesheetTranslation.js</code> before the text reaches this service.
+  </p>
+
+  <!-- API Reference -->
+  <h2>API Reference</h2>
+
+  <h3>GET /health</h3>
+  <p>Check service health and Ollama reachability. Always returns HTTP 200.</p>
+  <pre><span class="comment">// Response when Ollama is running and model is available</span>
+{
+  <span class="string">"status"</span>: <span class="string">"ok"</span>,
+  <span class="string">"ollama"</span>: <span class="string">"ok"</span>,
+  <span class="string">"model"</span>:  <span class="string">"nabard-translator"</span>
+}
+
+<span class="comment">// Response when Ollama is down</span>
+{
+  <span class="string">"status"</span>: <span class="string">"ok"</span>,
+  <span class="string">"ollama"</span>: <span class="string">"unreachable: All connection attempts failed"</span>,
+  <span class="string">"model"</span>:  <span class="string">"unknown"</span>
+}</pre>
+
+  <h3>POST /translate</h3>
+  <p>Translate English text to formal Hindi (Devanagari script).</p>
+  <pre><span class="comment">// Request</span>
+{
+  <span class="string">"text"</span>: <span class="string">"The Notesheet has been approved by the Department."</span>
+}
+
+<span class="comment">// Response</span>
+{
+  <span class="string">"hindi"</span>: <span class="string">"टिप्पणी पत्र को विभाग द्वारा अनुमोदित किया गया है।"</span>
+}</pre>
+
+  <h3>Error Responses</h3>
+  <table>
+    <thead>
+      <tr><th>Status</th><th>Reason</th><th>Detail message</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="err-422">422</span></td>
+        <td>Empty or missing <code>text</code> field</td>
+        <td>text must not be empty</td>
+      </tr>
+      <tr>
+        <td><span class="err-503">503</span></td>
+        <td>Ollama is unreachable</td>
+        <td>Ollama service is unreachable. Ensure Ollama is running.</td>
+      </tr>
+      <tr>
+        <td><span class="err-504">504</span></td>
+        <td>Ollama timed out</td>
+        <td>Ollama did not respond within 120 seconds.</td>
+      </tr>
+      <tr>
+        <td><span class="err-502">502</span></td>
+        <td>Ollama returned error or empty response</td>
+        <td>Ollama error: &lt;status&gt; / Ollama returned an empty translation.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Environment config -->
+  <h2>Configuration (.env)</h2>
+  <table>
+    <thead>
+      <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>OLLAMA_URL</code></td><td><code>http://localhost:11434</code></td><td>Ollama server base URL</td></tr>
+      <tr><td><code>OLLAMA_MODEL</code></td><td><code>nabard-translator</code></td><td>Model name to use for translation</td></tr>
+      <tr><td><code>OLLAMA_TIMEOUT</code></td><td><code>120</code></td><td>Request timeout in seconds</td></tr>
+      <tr><td><code>CORS_ORIGINS</code></td><td><code>http://localhost:3000</code></td><td>Comma-separated allowed CORS origins</td></tr>
+    </tbody>
+  </table>
+
+  <!-- File structure -->
+  <h2>File Structure</h2>
+  <pre>nabard-translation-service/
+├── <span class="string">main.py</span>              <span class="comment"># FastAPI app — endpoints, error handling, CORS</span>
+├── <span class="string">requirements.txt</span>     <span class="comment"># fastapi, uvicorn, httpx, python-dotenv, pydantic</span>
+├── <span class="string">.env</span>                 <span class="comment"># Local config (not committed to git)</span>
+├── <span class="string">.env.example</span>         <span class="comment"># Config template for new environments</span>
+├── <span class="string">README.md</span>            <span class="comment"># Setup and usage guide</span>
+└── <span class="string">translation-service-overview.html</span>   <span class="comment"># This file</span></pre>
+
+  <!-- Setup steps -->
+  <h2>Setup &amp; Running</h2>
+  <pre><span class="comment"># 1. Install dependencies</span>
+pip install -r requirements.txt
+
+<span class="comment"># 2. Copy and edit config</span>
+cp .env.example .env
+
+<span class="comment"># 3. Build the Ollama model (run from nabard-modern-ui directory)</span>
+ollama create nabard-translator -f Modelfile
+ollama list   <span class="comment"># verify it appears</span>
+
+<span class="comment"># 4. Start the server</span>
+python -m uvicorn main:app --port 8000 --reload
+
+<span class="comment"># 5. Check health</span>
+curl http://localhost:8000/health
+
+<span class="comment"># 6. Test translation</span>
+curl -X POST http://localhost:8000/translate \
+  -H "Content-Type: application/json" \
+  -d "{\"text\": \"The Notesheet has been approved.\"}"</pre>
+
+  <!-- Status -->
+  <h2>Development Status</h2>
+  <table>
+    <thead>
+      <tr><th>Item</th><th>Status</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>FastAPI app with /translate and /health</td>
+        <td><span class="status done">Done</span></td>
+        <td>Running on port 8000</td>
+      </tr>
+      <tr>
+        <td>CORS configured for localhost:3000</td>
+        <td><span class="status done">Done</span></td>
+        <td>Configurable via CORS_ORIGINS env var</td>
+      </tr>
+      <tr>
+        <td>Error handling (503, 504, 502, 422)</td>
+        <td><span class="status done">Done</span></td>
+        <td>Tested with Ollama down</td>
+      </tr>
+      <tr>
+        <td>nabard-translator Modelfile</td>
+        <td><span class="status done">Done</span></td>
+        <td>In nabard-modern-ui/Modelfile — rebuild with <code>ollama create</code></td>
+      </tr>
+      <tr>
+        <td>Frontend hook update (call /translate instead of Ollama directly)</td>
+        <td><span class="status pending">Pending</span></td>
+        <td>One-line change in useNotesheetTranslation.js</td>
+      </tr>
+      <tr>
+        <td>HTML structure retention (.docx → translate text nodes → output HTML)</td>
+        <td><span class="status pending">Pending</span></td>
+        <td>mammoth.convertToHtml() + walk text nodes</td>
+      </tr>
+      <tr>
+        <td>Production deployment</td>
+        <td><span class="status future">Future</span></td>
+        <td>Change OLLAMA_URL + CORS_ORIGINS for prod server; deploy behind existing auth</td>
+      </tr>
+      <tr>
+        <td>Glossary endpoint (GET /glossary)</td>
+        <td><span class="status future">Future</span></td>
+        <td>Expose NABARD terminology list for frontend display if needed</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Production notes -->
+  <h2>Production Notes</h2>
+  <p>
+    In production, Ollama runs on the application server — not the user's browser machine. The only change needed is:
+  </p>
+  <ul style="margin: 10px 0 10px 24px; color: #333;">
+    <li>Set <code>OLLAMA_URL</code> in <code>.env</code> to the production Ollama server address.</li>
+    <li>Set <code>CORS_ORIGINS</code> to the production frontend domain.</li>
+    <li>Update <code>TRANSLATE_API_URL</code> in the frontend hook to the deployed backend URL.</li>
+    <li>Deploy this service alongside the existing Java/Spring backend (same Tomcat or a separate process).</li>
+    <li>Optionally place it behind the existing authentication layer — the service itself has no auth.</li>
+  </ul>
+
+</main>
+
+<footer>
+  NABARD Case Management System — Translation Service &nbsp;|&nbsp; Generated 2026-06-08
+</footer>
+
+</body>
+</html>
