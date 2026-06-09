@@ -1,4 +1,5 @@
 import os
+import base64
 import uvicorn
 from io import BytesIO
 from fastapi import FastAPI, HTTPException, UploadFile, File
@@ -6,6 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import httpx
 import mammoth
+from docx import Document
+from htmldocx import HtmlToDocx
 
 app = FastAPI(
     title="NABARD Notesheet Translation Backend - FastAPI POC",
@@ -42,6 +45,7 @@ class TranslationRequest(BaseModel):
 
 class TranslationResponse(BaseModel):
     translated: str
+    docx_base64: str = ""
     structure_preserved: bool
     model_used: str
 
@@ -164,8 +168,21 @@ async def translate_document(file: UploadFile = File(...)):
 
             translated_content = response.json()["message"]["content"]
 
+            # Generate docx from translated HTML
+            docx_b64 = ""
+            try:
+                doc = Document()
+                parser = HtmlToDocx()
+                parser.add_html_to_document(translated_content, doc)
+                buf = BytesIO()
+                doc.save(buf)
+                docx_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+            except Exception:
+                pass  # docx generation failure is non-blocking
+
             return TranslationResponse(
                 translated=translated_content,
+                docx_base64=docx_b64,
                 structure_preserved=True,
                 model_used=OLLAMA_MODEL
             )
