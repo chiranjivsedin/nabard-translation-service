@@ -1,10 +1,11 @@
 import os
-import json
 import uvicorn
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from io import BytesIO
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import httpx
+import mammoth
 
 app = FastAPI(
     title="NABARD Notesheet Translation Backend - FastAPI POC",
@@ -23,6 +24,17 @@ app.add_middleware(
 
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "nabard-translator")
+
+SYSTEM_INSTRUCTION = (
+    "You are NABARD TranslateGemma, an expert translator specializing in translating administrative documents, "
+    "official notesheets, and banking correspondence from English to formal, official, administrative Hindi (Rajbhasha) "
+    "for the National Bank for Agriculture and Rural Development (NABARD). "
+    "\n\nCRITICAL CONSTRAINTS:"
+    "\n1. Translate ONLY the text content."
+    "\n2. Maintain the EXACT structure and placement of all HTML tags (such as <table>, <tr>, <td>, <ul>, <ol>, <li>, <p>, <h2>, <h3>, <h4>, <hr>, <strong>, etc.). Do NOT edit, delete, or translate any tag structures."
+    "\n3. Do NOT add any prefix, conversational intro, explanation, or code blocks. Only reply with the translated string retaining original HTML tags."
+    "\n4. Use high-quality official Hindi administrative vocabulary (Rajbhasha), e.g. use 'पुनर्वित्त' for 'refinance', 'स्वीकृति' for 'sanction', 'आवंटन' for 'allocation', 'संवितरण' for 'disbursement', 'अनुमोदनार्थ प्रस्तुत' for 'put up for approval'."
+)
 
 class TranslationRequest(BaseModel):
     content: str  # Can be raw text or HTML content
@@ -68,23 +80,11 @@ async def translate_notesheet(request: TranslationRequest):
     if not request.content.strip():
         raise HTTPException(status_code=400, detail="Content cannot be empty.")
 
-    # We construct a secure, structured prompt to ensure Ollama maintains the HTML layout intact.
-    system_instruction = (
-        "You are NABARD TranslateGemma, an expert translator specializing in translating administrative documents, "
-        "official notesheets, and banking correspondence from English to formal, official, administrative Hindi (Rajbhasha) "
-        "for the National Bank for Agriculture and Rural Development (NABARD). "
-        "\n\nCRITICAL CONSTRAINTS:"
-        "\n1. Translate ONLY the text content."
-        "\n2. Maintain the EXACT structure and placement of all HTML tags (such as <table>, <tr>, <td>, <ul>, <ol>, <li>, <p>, <h2>, <h3>, <h4>, <hr>, <strong>, etc.). Do NOT edit, delete, or translate any tag structures."
-        "\n3. Do NOT add any prefix, conversational intro, explanation, or code blocks. Only reply with the translated string retaining original HTML tags."
-        "\n4. Use high-quality official Hindi administrative vocabulary (Rajbhasha), e.g. use 'पुनर्वित्त' for 'refinance', 'स्वीकृति' for 'sanction', 'आवंटन' for 'allocation', 'संवितरण' for 'disbursement', 'अनुमोदनार्थ प्रस्तुत' for 'put up for approval'."
-    )
-
     ollama_url = f"{OLLAMA_HOST}/api/chat"
     payload = {
         "model": OLLAMA_MODEL,
         "messages": [
-            {"role": "system", "content": system_instruction},
+            {"role": "system", "content": SYSTEM_INSTRUCTION},
             {"role": "user", "content": f"Please translate this content: \n\n{request.content}"}
         ],
         "stream": False,
@@ -136,32 +136,16 @@ async def translate_document(file: UploadFile = File(...)):
 
     contents = await file.read()
 
-    try:
-        import mammoth
-        from io import BytesIO
-        result = mammoth.convert_to_html(BytesIO(contents))
-        html_content = result.value
-    except ImportError:
-        raise HTTPException(status_code=500, detail="mammoth is not installed. Run: pip install mammoth")
+    result = mammoth.convert_to_html(BytesIO(contents))
+    html_content = result.value
 
     if not html_content.strip():
         raise HTTPException(status_code=422, detail="The document appears to be empty or contains no readable text.")
 
-    system_instruction = (
-        "You are NABARD TranslateGemma, an expert translator specializing in translating administrative documents, "
-        "official notesheets, and banking correspondence from English to formal, official, administrative Hindi (Rajbhasha) "
-        "for the National Bank for Agriculture and Rural Development (NABARD). "
-        "\n\nCRITICAL CONSTRAINTS:"
-        "\n1. Translate ONLY the text content."
-        "\n2. Maintain the EXACT structure and placement of all HTML tags (such as <table>, <tr>, <td>, <ul>, <ol>, <li>, <p>, <h2>, <h3>, <h4>, <hr>, <strong>, etc.). Do NOT edit, delete, or translate any tag structures."
-        "\n3. Do NOT add any prefix, conversational intro, explanation, or code blocks. Only reply with the translated string retaining original HTML tags."
-        "\n4. Use high-quality official Hindi administrative vocabulary (Rajbhasha), e.g. use 'पुनर्वित्त' for 'refinance', 'स्वीकृति' for 'sanction', 'आवंटन' for 'allocation', 'संवितरण' for 'disbursement', 'अनुमोदनार्थ प्रस्तुत' for 'put up for approval'."
-    )
-
     payload = {
         "model": OLLAMA_MODEL,
         "messages": [
-            {"role": "system", "content": system_instruction},
+            {"role": "system", "content": SYSTEM_INSTRUCTION},
             {"role": "user", "content": f"Please translate this content: \n\n{html_content}"}
         ],
         "stream": False,
@@ -198,49 +182,6 @@ async def translate_document(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Translation error: {str(e)}")
 
-
-@app.post("/api/parse-document")
-async def parse_document(file: UploadFile = File(...)):
-    """
-    Parses notesheet file uploads (.txt, .html, .docx) and returns extracted content to the client.
-    Note: To parse .docx files, you should run `pip install mammoth`.
-    """
-    filename = file.filename.lower()
-    contents = await file.read()
-    
-    if filename.endswith(".txt"):
-        text = contents.decode("utf-8", errors="ignore")
-        # Format text to paragraphs
-        html = "".join(f"<p>{line}</p>" for line in text.split("\n") if line.strip())
-        return {"content": html, "fileName": file.filename, "type": "txt"}
-        
-    elif filename.endswith(".html") or filename.endswith(".htm"):
-        html = contents.decode("utf-8", errors="ignore")
-        return {"content": html, "fileName": file.filename, "type": "html"}
-        
-    elif filename.endswith(".docx"):
-        try:
-            # We attempt to import mammoth for Word Document extraction
-            import mammoth
-            from io import BytesIO
-            
-            result = mammoth.convert_to_html(BytesIO(contents))
-            return {
-                "content": result.value,
-                "warnings": result.messages,
-                "fileName": file.filename,
-                "type": "docx"
-            }
-        except ImportError:
-            # Fallback warning if mammoth Python library is not installed
-            return {
-                "content": "<p><strong>Error:</strong> Please run <code>pip install mammoth</code> on your FastAPI system to enable DOCX Word notesheet parsing!</p>",
-                "fileName": file.filename,
-                "type": "docx",
-                "error": "mammoth-not-installed"
-            }
-    else:
-        raise HTTPException(status_code=400, detail="Unsupported file format. Please upload .txt, .html, or .docx notesheets.")
 
 if __name__ == "__main__":
     print(f"Starting FastAPI server for NABARD Notesheet Translator...")
