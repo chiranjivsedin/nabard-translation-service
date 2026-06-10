@@ -166,6 +166,17 @@ The service is **stateless** — no database, no session state.
 
 ---
 
+## Integration Note for Backend Team
+
+This service was originally prototyped with frontend integration. For the correct **server-to-server** approach:
+
+- Use **`POST /api/translate-html`** for both the notesheet editor tab and the upload tab.
+- For the upload tab, the Java backend should fetch the saved document from Documentum, extract its HTML content, and send it to `/api/translate-html` — no need to re-upload the file to this service.
+- `/api/translate-document` accepts a `.docx` file directly and handles the HTML extraction internally — use it only if fetching and extracting HTML from Documentum is not straightforward.
+- `/api/translate` is for plain text and is useful for testing the service quickly.
+
+---
+
 ## Production Notes
 
 - Run on a dedicated server with minimum **16GB RAM**. A GPU is strongly recommended for acceptable translation speed.
