@@ -1,5 +1,6 @@
 import os
 import base64
+import logging
 import uvicorn
 from io import BytesIO
 from fastapi import FastAPI, HTTPException, UploadFile, File
@@ -9,24 +10,38 @@ import httpx
 import mammoth
 from docx import Document
 from htmldocx import HtmlToDocx
+from dotenv import load_dotenv
+
+load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger("nabard-translator")
+
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "nabard-translator")
+OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "300"))
+MAX_UPLOAD_MB = float(os.getenv("MAX_UPLOAD_MB", "20"))
+MAX_UPLOAD_BYTES = int(MAX_UPLOAD_MB * 1024 * 1024)
+
+_raw_cors = os.getenv("CORS_ORIGINS", "http://localhost:3000")
+CORS_ORIGINS = [o.strip() for o in _raw_cors.split(",") if o.strip()]
 
 app = FastAPI(
-    title="NABARD Notesheet Translation Backend - FastAPI POC",
-    description="Python FastAPI backend POC to translate administrative English notesheets into official Hindi using a local Ollama model (nabard-translator)",
-    version="1.0.0"
+    title="NABARD Notesheet Translation Service",
+    description="Translates administrative English notesheets to formal Hindi using a local Ollama model.",
+    version="2.0.0",
 )
 
-# Enable CORS so the React frontend can easily make requests to this backend when running locally
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "nabard-translator")
 
 SYSTEM_INSTRUCTION = (
     "You are NABARD TranslateGemma, an expert translator specializing in translating administrative documents, "
@@ -39,18 +54,21 @@ SYSTEM_INSTRUCTION = (
     "\n4. Use high-quality official Hindi administrative vocabulary (Rajbhasha), e.g. use 'पुनर्वित्त' for 'refinance', 'स्वीकृति' for 'sanction', 'आवंटन' for 'allocation', 'संवितरण' for 'disbursement', 'अनुमोदनार्थ प्रस्तुत' for 'put up for approval'."
 )
 
+
 class TranslationRequest(BaseModel):
     content: str
-    style: str = "Rajbhasha"
+
 
 class HtmlTranslationRequest(BaseModel):
     html: str
+
 
 class TranslationResponse(BaseModel):
     translated: str
     docx_base64: str = ""
     structure_preserved: bool
     model_used: str
+
 
 def html_to_docx_base64(html: str) -> str:
     doc = Document()
@@ -65,23 +83,31 @@ async def call_ollama_chat(content: str) -> str:
         "model": OLLAMA_MODEL,
         "messages": [
             {"role": "system", "content": SYSTEM_INSTRUCTION},
-            {"role": "user", "content": f"Please translate this content: \n\n{content}"}
+            {"role": "user", "content": f"Please translate this content: \n\n{content}"},
         ],
         "stream": False,
-        "options": {"temperature": 0.1}
+        "options": {"temperature": 0.1},
     }
+    logger.info("Sending translation request to Ollama (model=%s)", OLLAMA_MODEL)
     try:
-        async with httpx.AsyncClient(timeout=300.0) as client:
+        async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT) as client:
             response = await client.post(f"{OLLAMA_HOST}/api/chat", json=payload)
             if response.status_code != 200:
+                logger.error("Ollama returned status %s", response.status_code)
                 raise HTTPException(status_code=500, detail=f"Ollama error: {response.status_code}")
-            return response.json()["message"]["content"]
+            result = response.json()["message"]["content"]
+            logger.info("Translation completed successfully")
+            return result
     except httpx.ConnectError:
+        logger.error("Cannot connect to Ollama at %s", OLLAMA_HOST)
         raise HTTPException(
             status_code=503,
-            detail=f"Could not connect to Ollama at {OLLAMA_HOST}. Ensure Ollama is running."
+            detail=f"Could not connect to Ollama at {OLLAMA_HOST}. Ensure Ollama is running.",
         )
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.exception("Unexpected error during translation")
         raise HTTPException(status_code=500, detail=f"Translation error: {str(e)}")
 
 
@@ -108,8 +134,9 @@ def read_root():
         "status": "online",
         "service": "NABARD Notesheet Translator",
         "ollama_endpoint": OLLAMA_HOST,
-        "ollama_model": OLLAMA_MODEL
+        "ollama_model": OLLAMA_MODEL,
     }
+
 
 @app.post("/api/translate", response_model=TranslationResponse)
 async def translate_notesheet(request: TranslationRequest):
@@ -121,38 +148,40 @@ async def translate_notesheet(request: TranslationRequest):
 
 @app.post("/api/translate-html", response_model=TranslationResponse)
 async def translate_html(request: HtmlTranslationRequest):
-    """
-    Accepts HTML content (e.g. from the rich text editor in Create Case notesheet tab),
-    translates it to Hindi, generates a .docx, and returns both translated HTML and docx_base64.
-    """
     if not request.html.strip():
         raise HTTPException(status_code=400, detail="HTML content cannot be empty.")
 
+    logger.info("translate-html request received")
     translated = await call_ollama_chat(request.html)
 
     docx_b64 = ""
     try:
         docx_b64 = html_to_docx_base64(translated)
     except Exception:
-        pass
+        logger.warning("docx generation failed for translate-html; returning without docx")
 
     return TranslationResponse(
         translated=translated,
         docx_base64=docx_b64,
         structure_preserved=True,
-        model_used=OLLAMA_MODEL
+        model_used=OLLAMA_MODEL,
     )
+
 
 @app.post("/api/translate-document", response_model=TranslationResponse)
 async def translate_document(file: UploadFile = File(...)):
-    """
-    Accepts a .docx file, converts it to HTML via mammoth, translates the HTML
-    to formal Hindi via Ollama /api/chat, and returns the translated HTML.
-    """
     if not file.filename.lower().endswith((".docx", ".doc")):
         raise HTTPException(status_code=422, detail="Only .doc and .docx files are accepted.")
 
     contents = await file.read()
+
+    if len(contents) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum allowed size is {MAX_UPLOAD_MB:.0f} MB.",
+        )
+
+    logger.info("translate-document request: file=%s size=%d bytes", file.filename, len(contents))
 
     result = mammoth.convert_to_html(BytesIO(contents))
     html_content = result.value
@@ -166,17 +195,16 @@ async def translate_document(file: UploadFile = File(...)):
     try:
         docx_b64 = html_to_docx_base64(translated_content)
     except Exception:
-        pass
+        logger.warning("docx generation failed for translate-document; returning without docx")
 
     return TranslationResponse(
         translated=translated_content,
         docx_base64=docx_b64,
         structure_preserved=True,
-        model_used=OLLAMA_MODEL
+        model_used=OLLAMA_MODEL,
     )
 
 
 if __name__ == "__main__":
-    print(f"Starting FastAPI server for NABARD Notesheet Translator...")
-    print(f"Connecting to Ollama model '{OLLAMA_MODEL}' at {OLLAMA_HOST}")
+    logger.info("Starting NABARD Translation Service (model=%s, ollama=%s)", OLLAMA_MODEL, OLLAMA_HOST)
     uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
