@@ -1,6 +1,6 @@
 # NABARD Translation Service
 
-FastAPI backend that translates English notesheets to formal Hindi using a local [Ollama](https://ollama.com) model (`nabard-translator`).
+FastAPI backend that translates English notesheets to formal Hindi (Rajbhasha) using a local [Ollama](https://ollama.com) model (`nabard-translator`).
 
 ## Prerequisites
 
@@ -18,22 +18,21 @@ pip install -r requirements.txt
 
 ### 2. Configure environment
 
-Copy `.env.example` to `.env` and adjust as needed:
-
 ```bash
 cp .env.example .env
 ```
 
 | Variable | Default | Description |
 |---|---|---|
-| `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL |
+| `OLLAMA_HOST` | `http://localhost:11434` | Ollama server URL |
 | `OLLAMA_MODEL` | `nabard-translator` | Model name to use |
-| `OLLAMA_TIMEOUT` | `120` | Request timeout in seconds |
+| `OLLAMA_TIMEOUT` | `300` | Request timeout in seconds |
+| `MAX_UPLOAD_MB` | `20` | Max file upload size in MB |
 | `CORS_ORIGINS` | `http://localhost:3000` | Comma-separated allowed origins |
 
 ### 3. Build the Ollama model
 
-The `nabard-translator` model is a customised version of `translategemma` with a formal government Hindi system prompt. The `Modelfile` lives in the main frontend repo (`nabard-modern-ui/Modelfile`).
+The `nabard-translator` model is a customised version of `translategemma` with a formal Hindi system prompt. The `Modelfile` lives in the `nabard-modern-ui` repo.
 
 ```bash
 # From nabard-modern-ui directory
@@ -46,10 +45,10 @@ ollama list
 ### 4. Start the server
 
 ```bash
-python -m uvicorn main:app --port 8000 --reload
+uvicorn server:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Server runs at `http://localhost:8000`.
+Server runs at `http://localhost:8000`. Swagger UI available at `http://localhost:8000/docs`.
 
 ---
 
@@ -57,7 +56,7 @@ Server runs at `http://localhost:8000`.
 
 ### `GET /health`
 
-Check service health and Ollama reachability.
+Check service and Ollama reachability.
 
 **Response**
 ```json
@@ -68,32 +67,68 @@ Check service health and Ollama reachability.
 }
 ```
 
-If Ollama is down:
-```json
-{
-  "status": "ok",
-  "ollama": "unreachable: ...",
-  "model": "unknown"
-}
-```
-
 ---
 
-### `POST /translate`
+### `POST /api/translate`
 
-Translate English text to formal Hindi.
+Translate plain English text to Hindi.
 
 **Request**
 ```json
 {
-  "text": "The Notesheet has been approved by the Department."
+  "content": "The Notesheet has been approved by the Department."
 }
 ```
 
 **Response**
 ```json
 {
-  "hindi": "टिप्पणी पत्र को विभाग द्वारा अनुमोदित किया गया है।"
+  "translated": "टिप्पणी पत्र को विभाग द्वारा अनुमोदित किया गया है।",
+  "docx_base64": "",
+  "structure_preserved": true,
+  "model_used": "nabard-translator"
+}
+```
+
+---
+
+### `POST /api/translate-html`
+
+Translate HTML content (e.g. from rich text editor) to Hindi. Returns translated HTML and a generated `.docx` as base64.
+
+**Request**
+```json
+{
+  "html": "<p>The loan has been <strong>sanctioned</strong>.</p>"
+}
+```
+
+**Response**
+```json
+{
+  "translated": "<p>ऋण <strong>स्वीकृत</strong> किया गया है।</p>",
+  "docx_base64": "<base64 string>",
+  "structure_preserved": true,
+  "model_used": "nabard-translator"
+}
+```
+
+---
+
+### `POST /api/translate-document`
+
+Upload a `.doc` or `.docx` file. Converts to HTML via mammoth, translates to Hindi, returns translated HTML and a generated `.docx` as base64.
+
+**Request**
+`multipart/form-data` with field `file` — `.doc` or `.docx` only, max `MAX_UPLOAD_MB`.
+
+**Response**
+```json
+{
+  "translated": "<translated HTML>",
+  "docx_base64": "<base64 string>",
+  "structure_preserved": true,
+  "model_used": "nabard-translator"
 }
 ```
 
@@ -101,47 +136,43 @@ Translate English text to formal Hindi.
 
 | Status | Reason |
 |---|---|
-| `422` | Empty or missing `text` field |
+| `400` | Empty content |
+| `413` | File exceeds `MAX_UPLOAD_MB` |
+| `422` | Wrong file type or unreadable document |
 | `503` | Ollama is unreachable |
-| `504` | Ollama did not respond within timeout |
-| `502` | Ollama returned an error or empty translation |
-
----
-
-### `GET /docs`
-
-Auto-generated Swagger UI — available at `http://localhost:8000/docs`.
+| `500` | Translation or docx generation error |
 
 ---
 
 ## Architecture
 
 ```
-Frontend (React)
-    │
-    │  POST /translate  { text: "..." }
-    ▼
+Java Backend / Frontend
+        │
+        │  POST /api/translate-html   { html: "..." }
+        │  POST /api/translate-document  (multipart .docx)
+        ▼
 FastAPI (port 8000)
-    │
-    │  POST /api/generate  { model, prompt, stream: false }
-    ▼
+        │
+        │  POST /api/chat  (Ollama chat API)
+        ▼
 Ollama (port 11434)
-    │
-    ▼
-nabard-translator  (translategemma + NABARD system prompt)
+        │
+        ▼
+nabard-translator  (translategemma + NABARD Rajbhasha system prompt)
 ```
 
-The frontend sends plain English text. The backend forwards it to Ollama and returns the Hindi response. Glossary pre-processing (replacing known terms before translation) and artifact stripping (removing "Translation:" prefixes) are handled in the frontend hook (`useNotesheetTranslation.js`) before the text reaches this service.
+The service is **stateless** — no database, no session state.
 
 ---
 
 ## Production Notes
 
-- In production, Ollama runs on the application server (not the user's browser machine).
-- Change `OLLAMA_URL` in `.env` to point to the production Ollama instance.
-- Update `CORS_ORIGINS` to the production frontend domain.
-- The frontend hook needs its `OLLAMA_URL` constant replaced with the deployed backend URL (one-line change in `useNotesheetTranslation.js`).
-- The service is stateless — no database, no auth. Deploy behind the existing backend's authentication layer if needed.
+- Run on a dedicated server with minimum **16GB RAM**. A GPU is strongly recommended for acceptable translation speed.
+- Set `OLLAMA_HOST` in `.env` if Ollama runs on a separate machine.
+- Set `CORS_ORIGINS` to the production frontend domain.
+- Deploy Ollama as a system service so it restarts on reboot.
+- The service has no built-in auth — deploy behind the application's authentication layer.
 
 ---
 
@@ -149,7 +180,7 @@ The frontend sends plain English text. The backend forwards it to Ollama and ret
 
 ```
 nabard-translation-service/
-├── main.py              # FastAPI app
+├── server.py            # FastAPI application
 ├── requirements.txt     # Python dependencies
 ├── .env                 # Local config (not committed)
 ├── .env.example         # Config template
