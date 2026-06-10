@@ -40,14 +40,50 @@ SYSTEM_INSTRUCTION = (
 )
 
 class TranslationRequest(BaseModel):
-    content: str  # Can be raw text or HTML content
-    style: str = "Rajbhasha"  # Optional styling choice
+    content: str
+    style: str = "Rajbhasha"
+
+class HtmlTranslationRequest(BaseModel):
+    html: str
 
 class TranslationResponse(BaseModel):
     translated: str
     docx_base64: str = ""
     structure_preserved: bool
     model_used: str
+
+def html_to_docx_base64(html: str) -> str:
+    doc = Document()
+    HtmlToDocx().add_html_to_document(html, doc)
+    buf = BytesIO()
+    doc.save(buf)
+    return base64.b64encode(buf.getvalue()).decode("utf-8")
+
+
+async def call_ollama_chat(content: str) -> str:
+    payload = {
+        "model": OLLAMA_MODEL,
+        "messages": [
+            {"role": "system", "content": SYSTEM_INSTRUCTION},
+            {"role": "user", "content": f"Please translate this content: \n\n{content}"}
+        ],
+        "stream": False,
+        "options": {"temperature": 0.1}
+    }
+    try:
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            response = await client.post(f"{OLLAMA_HOST}/api/chat", json=payload)
+            if response.status_code != 200:
+                raise HTTPException(status_code=500, detail=f"Ollama error: {response.status_code}")
+            return response.json()["message"]["content"]
+    except httpx.ConnectError:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Could not connect to Ollama at {OLLAMA_HOST}. Ensure Ollama is running."
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Translation error: {str(e)}")
+
 
 @app.get("/health")
 async def health():
@@ -77,57 +113,35 @@ def read_root():
 
 @app.post("/api/translate", response_model=TranslationResponse)
 async def translate_notesheet(request: TranslationRequest):
-    """
-    Translates English notesheet contents (with HTML/text formatting) into formal governmental Hindi,
-    maintaining formatting by instructing the local Ollama TranslateGemma (nabard-translator) model.
-    """
     if not request.content.strip():
         raise HTTPException(status_code=400, detail="Content cannot be empty.")
+    translated = await call_ollama_chat(request.content)
+    return TranslationResponse(translated=translated, structure_preserved=True, model_used=OLLAMA_MODEL)
 
-    ollama_url = f"{OLLAMA_HOST}/api/chat"
-    payload = {
-        "model": OLLAMA_MODEL,
-        "messages": [
-            {"role": "system", "content": SYSTEM_INSTRUCTION},
-            {"role": "user", "content": f"Please translate this content: \n\n{request.content}"}
-        ],
-        "stream": False,
-        "options": {
-            "temperature": 0.1,  # Low temperature ensures high accuracy and consistency
-        }
-    }
 
+@app.post("/api/translate-html", response_model=TranslationResponse)
+async def translate_html(request: HtmlTranslationRequest):
+    """
+    Accepts HTML content (e.g. from the rich text editor in Create Case notesheet tab),
+    translates it to Hindi, generates a .docx, and returns both translated HTML and docx_base64.
+    """
+    if not request.html.strip():
+        raise HTTPException(status_code=400, detail="HTML content cannot be empty.")
+
+    translated = await call_ollama_chat(request.html)
+
+    docx_b64 = ""
     try:
-        async with httpx.AsyncClient(timeout=300.0) as client:
-            response = await client.post(ollama_url, json=payload)
-            
-            if response.status_code != 200:
-                raise HTTPException(
-                    status_code=500, 
-                    detail=f"Ollama backend returned status {response.status_code}: {response.text}"
-                )
-                
-            resp_data = response.json()
-            translated_content = resp_data["message"]["content"]
-            
-            return TranslationResponse(
-                translated=translated_content,
-                structure_preserved=True,
-                model_used=OLLAMA_MODEL
-            )
+        docx_b64 = html_to_docx_base64(translated)
+    except Exception:
+        pass
 
-    except httpx.ConnectError:
-        # Provide a helpful error when Ollama is not running
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                f"Could not connect to Ollama service at {OLLAMA_HOST}. "
-                "Ensure Ollama is running (`ollama serve`) and the model "
-                f"'{OLLAMA_MODEL}' is successfully pulled."
-            )
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Translation error: {str(e)}")
+    return TranslationResponse(
+        translated=translated,
+        docx_base64=docx_b64,
+        structure_preserved=True,
+        model_used=OLLAMA_MODEL
+    )
 
 @app.post("/api/translate-document", response_model=TranslationResponse)
 async def translate_document(file: UploadFile = File(...)):
@@ -146,58 +160,20 @@ async def translate_document(file: UploadFile = File(...)):
     if not html_content.strip():
         raise HTTPException(status_code=422, detail="The document appears to be empty or contains no readable text.")
 
-    payload = {
-        "model": OLLAMA_MODEL,
-        "messages": [
-            {"role": "system", "content": SYSTEM_INSTRUCTION},
-            {"role": "user", "content": f"Please translate this content: \n\n{html_content}"}
-        ],
-        "stream": False,
-        "options": {"temperature": 0.1}
-    }
+    translated_content = await call_ollama_chat(html_content)
 
+    docx_b64 = ""
     try:
-        async with httpx.AsyncClient(timeout=300.0) as client:
-            response = await client.post(f"{OLLAMA_HOST}/api/chat", json=payload)
+        docx_b64 = html_to_docx_base64(translated_content)
+    except Exception:
+        pass
 
-            if response.status_code != 200:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Ollama backend returned status {response.status_code}: {response.text}"
-                )
-
-            translated_content = response.json()["message"]["content"]
-
-            # Generate docx from translated HTML
-            docx_b64 = ""
-            try:
-                doc = Document()
-                parser = HtmlToDocx()
-                parser.add_html_to_document(translated_content, doc)
-                buf = BytesIO()
-                doc.save(buf)
-                docx_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-            except Exception:
-                pass  # docx generation failure is non-blocking
-
-            return TranslationResponse(
-                translated=translated_content,
-                docx_base64=docx_b64,
-                structure_preserved=True,
-                model_used=OLLAMA_MODEL
-            )
-
-    except httpx.ConnectError:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                f"Could not connect to Ollama service at {OLLAMA_HOST}. "
-                "Ensure Ollama is running (`ollama serve`) and the model "
-                f"'{OLLAMA_MODEL}' is successfully pulled."
-            )
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Translation error: {str(e)}")
+    return TranslationResponse(
+        translated=translated_content,
+        docx_base64=docx_b64,
+        structure_preserved=True,
+        model_used=OLLAMA_MODEL
+    )
 
 
 if __name__ == "__main__":
