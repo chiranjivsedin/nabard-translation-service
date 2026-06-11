@@ -1,12 +1,11 @@
 # NABARD Translation Service
 
-FastAPI backend that translates English notesheets to formal Hindi (Rajbhasha) using a local [Ollama](https://ollama.com) model (`nabard-translator`).
+FastAPI backend that translates English notesheets to formal Hindi (Rajbhasha) using a pluggable AI backend — switch between Ollama (local) and Gemini (cloud) via a single env var.
 
 ## Prerequisites
 
 - Python 3.10+
-- [Ollama](https://ollama.com) installed and running
-- `nabard-translator` model built (see setup below)
+- Ollama installed and running **or** a Gemini API key
 
 ## Setup
 
@@ -14,6 +13,11 @@ FastAPI backend that translates English notesheets to formal Hindi (Rajbhasha) u
 
 ```bash
 pip install -r requirements.txt
+```
+
+For Gemini backend, also install:
+```bash
+pip install google-generativeai
 ```
 
 ### 2. Configure environment
@@ -24,13 +28,16 @@ cp .env.example .env
 
 | Variable | Default | Description |
 |---|---|---|
-| `OLLAMA_HOST` | `http://localhost:11434` | Ollama server URL |
-| `OLLAMA_MODEL` | `nabard-translator` | Model name to use |
-| `OLLAMA_TIMEOUT` | `300` | Request timeout in seconds |
+| `TRANSLATOR_BACKEND` | `ollama` | Which backend to use: `ollama` or `gemini` |
 | `MAX_UPLOAD_MB` | `20` | Max file upload size in MB |
 | `CORS_ORIGINS` | `http://localhost:3000` | Comma-separated allowed origins |
+| `OLLAMA_HOST` | `http://localhost:11434` | Ollama server URL (ollama only) |
+| `OLLAMA_MODEL` | `nabard-translator` | Model name (ollama only) |
+| `OLLAMA_TIMEOUT` | `300` | Request timeout in seconds (ollama only) |
+| `GEMINI_API_KEY` | — | Gemini API key (gemini only) |
+| `GEMINI_MODEL` | `gemini-2.0-flash` | Gemini model name (gemini only) |
 
-### 3. Build the Ollama model
+### 3. Build the Ollama model (Ollama backend only)
 
 The `nabard-translator` model is a customised version of `translategemma` with a formal Hindi system prompt. The `Modelfile` lives in the `nabard-modern-ui` repo.
 
@@ -52,18 +59,51 @@ Server runs at `http://localhost:8000`. Swagger UI available at `http://localhos
 
 ---
 
+## Switching Backends
+
+Only one env var needs to change — no code changes required.
+
+**Ollama (local model):**
+```env
+TRANSLATOR_BACKEND=ollama
+OLLAMA_HOST=http://localhost:11434
+OLLAMA_MODEL=nabard-translator
+```
+
+**Gemini (cloud):**
+```env
+TRANSLATOR_BACKEND=gemini
+GEMINI_API_KEY=your-api-key-here
+GEMINI_MODEL=gemini-2.0-flash
+```
+
+Restart the server after changing `.env`.
+
+---
+
+## Adding a New Backend
+
+1. Create `translators/yourbackend.py` extending `BaseTranslator`
+2. Implement the `translate(content: str) -> str` method
+3. Register it in `translators/factory.py`
+4. Set `TRANSLATOR_BACKEND=yourbackend` in `.env`
+
+No changes to `server.py` or any endpoints needed.
+
+---
+
 ## API Reference
 
 ### `GET /health`
 
-Check service and Ollama reachability.
+Check service health and active backend.
 
 **Response**
 ```json
 {
   "status": "ok",
-  "ollama": "ok",
-  "model": "nabard-translator"
+  "backend": "gemini",
+  "model": "gemini-2.0-flash"
 }
 ```
 
@@ -86,7 +126,7 @@ Translate plain English text to Hindi.
   "translated": "टिप्पणी पत्र को विभाग द्वारा अनुमोदित किया गया है।",
   "docx_base64": "",
   "structure_preserved": true,
-  "model_used": "nabard-translator"
+  "model_used": "gemini-2.0-flash"
 }
 ```
 
@@ -109,7 +149,7 @@ Translate HTML content (e.g. from rich text editor) to Hindi. Returns translated
   "translated": "<p>ऋण <strong>स्वीकृत</strong> किया गया है।</p>",
   "docx_base64": "<base64 string>",
   "structure_preserved": true,
-  "model_used": "nabard-translator"
+  "model_used": "gemini-2.0-flash"
 }
 ```
 
@@ -128,7 +168,7 @@ Upload a `.doc` or `.docx` file. Converts to HTML via mammoth, translates to Hin
   "translated": "<translated HTML>",
   "docx_base64": "<base64 string>",
   "structure_preserved": true,
-  "model_used": "nabard-translator"
+  "model_used": "gemini-2.0-flash"
 }
 ```
 
@@ -154,12 +194,11 @@ Java Backend / Frontend
         ▼
 FastAPI (port 8000)
         │
-        │  POST /api/chat  (Ollama chat API)
         ▼
-Ollama (port 11434)
+translators/factory.py  (reads TRANSLATOR_BACKEND)
         │
-        ▼
-nabard-translator  (translategemma + NABARD Rajbhasha system prompt)
+        ├── OllamaTranslator  →  Ollama (port 11434)  →  nabard-translator
+        └── GeminiTranslator  →  Gemini API  →  gemini-2.0-flash
 ```
 
 The service is **stateless** — no database, no session state.
@@ -179,10 +218,9 @@ This service was originally prototyped with frontend integration. For the correc
 
 ## Production Notes
 
-- Run on a dedicated server with minimum **16GB RAM**. A GPU is strongly recommended for acceptable translation speed.
-- Set `OLLAMA_HOST` in `.env` if Ollama runs on a separate machine.
+- For **Gemini**: no server setup needed, just a valid `GEMINI_API_KEY`.
+- For **Ollama**: run on a dedicated server with minimum **16GB RAM**. A GPU is strongly recommended for acceptable translation speed.
 - Set `CORS_ORIGINS` to the production frontend domain.
-- Deploy Ollama as a system service so it restarts on reboot.
 - The service has no built-in auth — deploy behind the application's authentication layer.
 
 ---
@@ -191,9 +229,14 @@ This service was originally prototyped with frontend integration. For the correc
 
 ```
 nabard-translation-service/
-├── server.py            # FastAPI application
-├── requirements.txt     # Python dependencies
-├── .env                 # Local config (not committed)
-├── .env.example         # Config template
+├── server.py                # FastAPI application
+├── translators/
+│   ├── base.py              # Abstract base class
+│   ├── factory.py           # Backend selector (reads TRANSLATOR_BACKEND)
+│   ├── ollama.py            # Ollama implementation
+│   └── gemini.py            # Gemini implementation
+├── requirements.txt         # Python dependencies
+├── .env                     # Local config (not committed)
+├── .env.example             # Config template
 └── README.md
 ```
