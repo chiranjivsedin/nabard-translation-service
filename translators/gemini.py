@@ -24,19 +24,24 @@ class GeminiTranslator(BaseTranslator):
             raise RuntimeError("GEMINI_API_KEY is required for GeminiTranslator")
 
         try:
-            import google.generativeai as genai
-            genai.configure(api_key=api_key)
-            self.model = genai.GenerativeModel(
-                model_name=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
-                system_instruction=SYSTEM_INSTRUCTION,
-            )
-            logger.info("GeminiTranslator initialized (model=%s)", os.getenv("GEMINI_MODEL", "gemini-2.0-flash"))
+            from google import genai
+            self.client = genai.Client(api_key=api_key)
+            self.model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+            logger.info("GeminiTranslator initialized (model=%s)", self.model_name)
         except ImportError:
-            raise RuntimeError("google-generativeai package is not installed. Run: pip install google-generativeai")
+            raise RuntimeError("google-genai package is not installed. Run: pip install google-genai")
 
     async def translate(self, content: str) -> str:
         try:
-            response = self.model.generate_content(content)
+            from google.genai import types
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=f"Please translate this content:\n\n{content}",
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_INSTRUCTION,
+                    temperature=0.1,
+                ),
+            )
             result = response.text
             logger.info("Gemini translation completed")
             return result

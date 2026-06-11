@@ -8,4 +8,4 @@ mammoth>=1.8.0
 htmldocx>=0.0.6
 
 # Gemini backend (install if TRANSLATOR_BACKEND=gemini)
-# google-generativeai>=0.8.0
+# google-genai>=1.0.0
